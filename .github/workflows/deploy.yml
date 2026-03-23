@@ -1,0 +1,76 @@
+name: Blue-Green Deploy
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build and push
+      run: |
+        docker build -t myorg/myapp:${{ github.sha }} .
+        docker push myorg/myapp:${{ github.sha }}
+  create-cluster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Terraform Init & Apply
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve
+      - name: Set AWS_ROLE_ARN
+        run: echo "AWS_ROLE_ARN=$(terraform output -raw aws_role_arn)" >> $GITHUB_ENV
+  deploy-green:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Connect to EKS
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+      - name: Deploy to green
+        run: ./scripts/deploy.sh ${{ github.sha }} green
+  smoke-test:
+    needs: deploy-green
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Connect to EKS
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+      - name: Test green via port-forward
+        run: |
+          kubectl port-forward svc/green-service 8081:80 &
+          sleep 3 && curl -f http://localhost:8081/health
+  switch-traffic:
+    needs: smoke-test
+    environment: production  # manual approval gate
+    runs-on: ubuntu-latest
+    steps:
+    - name: Switch selector to green
+      run: kubectl patch service app-service -p '{"spec":{"selector":{"version":"green"}}}'
+
+  destroy-cluster:
+    needs: switch-traffic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Destroy Terraform
+        working-directory: terraform  # path to your terraform files
+        run: |
+          terraform init
+          terraform destroy -auto-approve

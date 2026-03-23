@@ -1,0 +1,18 @@
+# Git
+.git
+.gitignore
+# Kubernetes manifests — not needed in image
+k8s/
+scripts/
+.github/
+# Local dev artifacts
+*.md
+*.env
+.env*
+# Test files
+*_test.go
+coverage.out
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
