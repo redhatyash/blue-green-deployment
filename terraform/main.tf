@@ -31,7 +31,6 @@ module "eks" {
 
   cluster_name    = "uat-eks-cluster"
   cluster_version = "1.29"
-
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
@@ -46,7 +45,19 @@ module "eks" {
     }
   }
 }
+resource "aws_auth_configmap" "example" {
+  depends_on = [module.eks]
 
+  kubernetes_config_map_name = "aws-auth"
+
+  map_users = [
+    {
+      userarn  = "arn:aws:iam::836705482111:user/testdeploy"
+      username = "testdeploy"
+      groups   = ["system:masters"]
+    }
+  ]
+}
 terraform {
   backend "s3" {
     bucket         = "yourstate-bucket"
