@@ -1,36 +1,52 @@
 name: Blue-Green Deploy
 on:
   workflow_dispatch:
+
 permissions:
-  id-token: write
   contents: write
+env:
+  AWS_REGION: ap-south-1
+  CLUSTER_NAME: uat-eks-cluster
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Build and push
-      run: |
-        docker build -t saiy8077/myapp:${{ github.sha }} .
-        docker push saiy8077/myapp:${{ github.sha }}
-    - name: Replace image placeholder in deployment YAML
-      run: |
-        sed -i 's|IMAGE_PLACEHOLDER|saiy8077/myapp:${{ github.sha }}|g' k8s/blue-deployment.yaml
-        sed -i 's|IMAGE_PLACEHOLDER|saiy8077/myapp:${{ github.sha }}|g' k8s/green-deployment.yaml
+      - uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build and push Docker image
+        run: |
+          docker build -t saiy8077/myapp:${{ github.sha }} .
+          docker push saiy8077/myapp:${{ github.sha }}
+      - name: Replace image placeholder
+        run: |
+          sed -i 's|IMAGE_PLACEHOLDER|saiy8077/myapp:${{ github.sha }}|g' k8s/blue-deployment.yaml
+          sed -i 's|IMAGE_PLACEHOLDER|saiy8077/myapp:${{ github.sha }}|g' k8s/green-deployment.yaml
+      - name: Commit updated manifest
+        run: |
+          git config user.email "ci@github.com"
+          git config user.name "GitHub Actions"
+          git add .
+          git commit -m "Update image to ${{ github.sha }}"
+          git push
 
-    - name: Commit updated manifest
-      run: |
-        git config user.email "ci@github.com"
-        git config user.name "GitHub Actions"
-        git add .
-        git commit -m "Update image to ${{ github.sha }}"
-        git push
   create-cluster:
     runs-on: ubuntu-latest
-    outputs:
-      aws_role_arn: ${{ steps.tf.outputs.aws_role_arn }}
     steps:
       - uses: actions/checkout@v4
+
+      # 🔑 Use Access Key & Secret
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
@@ -39,22 +55,23 @@ jobs:
         run: |
           terraform init
           terraform apply --auto-approve
-      - name: Set AWS_ROLE_ARN
-        run: echo "AWS_ROLE_ARN=$(terraform output -raw aws_role_arn)" >> $GITHUB_OUTPUT
+
   deploy-green:
     needs: [build, create-cluster]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ needs.create-cluster.outputs.aws_role_arn }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
       - name: Connect to EKS
-        run: |
-          aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
       - name: Deploy to green
         run: ./scripts/deploy.sh ${{ github.sha }} green
+
   smoke-test:
     needs: deploy-green
     runs-on: ubuntu-latest
@@ -62,25 +79,28 @@ jobs:
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ needs.create-cluster.outputs.aws_role_arn }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
       - name: Connect to EKS
-        run: |
-          aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
       - name: Test green via port-forward
         run: |
           kubectl port-forward svc/green-service 8080:80 &
-          sleep 3 && curl -f http://localhost:8080/health
+          sleep 3
+          curl -f http://localhost:8080/health
+
   switch-traffic:
     needs: smoke-test
-    environment: production  # manual approval gate
+    environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ needs.create-cluster.outputs.aws_role_arn }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
       - name: Switch selector to green
         run: kubectl patch service app-service -p '{"spec":{"selector":{"version":"green"}}}'
 
@@ -92,13 +112,13 @@ jobs:
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-
-      - name: Destroy Terraform
-        working-directory: terraform  # path to your terraform files
+      - name: Terraform Destroy
+        working-directory: terraform
         run: |
           terraform init
           terraform destroy -auto-approve
