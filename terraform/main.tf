@@ -1,6 +1,6 @@
 provider "aws" {
   region = "ap-south-1"
-  
+
 }
 
 # -------------------------
@@ -52,6 +52,5 @@ terraform {
     bucket         = "yourstate-bucket"
     key            = "terraform/terraform.tfstate"
     region         = "ap-south-1"
-    dynamodb_table = "terraform-locks"
   }
 }
