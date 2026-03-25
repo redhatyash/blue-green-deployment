@@ -69,6 +69,8 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Connect to EKS
         run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+      - name: Make deploy script executable
+        run: chmod +x scripts/deploy.sh
       - name: Deploy to green
         run: ./scripts/deploy.sh ${{ github.sha }} green
 
