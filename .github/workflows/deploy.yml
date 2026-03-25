@@ -106,6 +106,7 @@ jobs:
 
   destroy-cluster:
     needs: switch-traffic
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
