@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: myapp
-        image: IMAGE_PLACEHOLDER  # ← new image
+        image: saiy8077/myapp:d625c1858de9b25880d3e1b8e46ecf9bac451481  # ← new image
         ports:
         - containerPort: 8080
         readinessProbe:
