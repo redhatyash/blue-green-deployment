@@ -1,6 +1,9 @@
 name: Blue-Green Deploy
 on:
   workflow_dispatch:
+permissions:
+  id-token: write
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,27 +27,28 @@ jobs:
         git push
   create-cluster:
     runs-on: ubuntu-latest
+    outputs:
+      aws_role_arn: ${{ steps.tf.outputs.aws_role_arn }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
+
       - name: Terraform Init & Apply
         working-directory: terraform
         run: |
           terraform init
           terraform apply --auto-approve
       - name: Set AWS_ROLE_ARN
-        run: echo "AWS_ROLE_ARN=$(terraform output -raw aws_role_arn)" >> $GITHUB_ENV
+        run: echo "AWS_ROLE_ARN=$(terraform output -raw aws_role_arn)" >> $GITHUB_OUTPUT
   deploy-green:
-    needs: build
+    needs: [build, create-cluster]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ needs.create-cluster.outputs.aws_role_arn }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Connect to EKS
         run: |
@@ -58,7 +62,7 @@ jobs:
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ needs.create-cluster.outputs.aws_role_arn }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Connect to EKS
         run: |
@@ -72,8 +76,13 @@ jobs:
     environment: production  # manual approval gate
     runs-on: ubuntu-latest
     steps:
-    - name: Switch selector to green
-      run: kubectl patch service app-service -p '{"spec":{"selector":{"version":"green"}}}'
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.create-cluster.outputs.aws_role_arn }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Switch selector to green
+        run: kubectl patch service app-service -p '{"spec":{"selector":{"version":"green"}}}'
 
   destroy-cluster:
     needs: switch-traffic
@@ -85,6 +94,9 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
       - name: Destroy Terraform
         working-directory: terraform  # path to your terraform files
         run: |
