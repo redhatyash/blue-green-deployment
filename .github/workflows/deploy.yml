@@ -24,8 +24,8 @@ jobs:
           docker push saiy8077/myapp:${{ github.sha }}
       - name: Replace image placeholder
         run: |
-          sed -i "s|image: .*|image: $IMAGE_NAME:${{ github.sha }}|g" k8s/blue-deployment.yaml
-          sed -i "s|image: .*|image: $IMAGE_NAME:${{ github.sha }}|g" k8s/green-deployment.yaml
+          sed -i "s|image: .*|image: saiy8077/myapp:${{ github.sha }}|g" k8s/blue-deployment.yaml
+          sed -i "s|image: .*|image: saiy8077/myapp:${{ github.sha }}|g" k8s/green-deployment.yaml
       - name: Commit updated manifest
         run: |
           git config user.email "ci@github.com"
