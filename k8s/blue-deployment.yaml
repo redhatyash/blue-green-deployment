@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: myapp
-        image: saiy8077/myapp:91835050ff6c902ca26cc70118a4a116f411ea02
+        image: saiy8077/myapp:0ecbdd471a530c0b51a6be2ac4da1fac4881ea51
         ports:
         - containerPort: 8080
         readinessProbe:
